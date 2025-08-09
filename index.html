@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Copper Bus Simulator — 3D + Heatmap</title>
+<style>
+  :root{
+    --bg:#0e0f12; --card:#171a20; --ink:#e6e7ea; --muted:#9aa0a6; --accent:#4da3ff;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif}
+  header{padding:16px 20px;position:sticky;top:0;z-index:5;backdrop-filter:saturate(1.2) blur(8px);
+    background:linear-gradient(180deg, rgba(23,26,32,.9), rgba(23,26,32,.6) 60%, rgba(23,26,32,0));
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  h1{font-size:20px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:13px}
+  main{padding:20px;max-width:1250px;margin:auto;display:grid;gap:18px;grid-template-columns:1.05fr .95fr}
+  @media (max-width:1100px){ main{grid-template-columns:1fr} }
+  .card{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px;
+    box-shadow:0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:680px){ .grid{grid-template-columns:1fr} }
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 6px}
+  .row{display:flex;gap:10px;align-items:center}
+  .row input[type="number"]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.1);
+    background:#0c0d10;color:var(--ink);font-size:14px;outline:none}
+  .units{white-space:nowrap;color:var(--muted);font-size:12px}
+  .switch{display:inline-flex;gap:8px;align-items:center;background:#0c0d10;border:1px solid rgba(255,255,255,.06);padding:4px;border-radius:999px}
+  .switch button{border:0;background:transparent;color:var(--muted);padding:6px 10px;border-radius:999px;cursor:pointer;font-size:12px}
+  .switch button.active{background:var(--accent);color:#05152a}
+  .kpi{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .kpi .item{background:#0c0d10;border-radius:12px;border:1px solid rgba(255,255,255,.06);padding:12px}
+  .kpi .label{color:var(--muted);font-size:12px}
+  .kpi .value{font-size:20px;font-weight:650;margin-top:2px}
+  canvas#heat{display:none}
+  .view3d{height:420px;border-radius:12px;border:1px solid rgba(255,255,255,.06);background:#0a0b0e;position:relative}
+  .overlay{position:absolute;right:10px;top:10px;background:rgba(0,0,0,.35);padding:6px 10px;border-radius:10px;font-size:12px;color:var(--muted);backdrop-filter:blur(6px)}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px}
+  .hr{height:1px;background:rgba(255,255,255,.08);margin:12px 0}
+  a{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>Copper Bus Simulator — 3D + Heatmap</h1>
+  <div class="sub">Rotate the 3D bus and tune geometry, current, and frequency. Surfaces are textured by the live current-density heatmap (skin-effect only; no proximity).</div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="grid">
+      <div>
+        <div class="row">
+          <label>Geometry units</label>
+          <div class="switch">
+            <button id="u_in" class="active" onclick="setUnits('in')">in</button>
+            <button id="u_mm" onclick="setUnits('mm')">mm</button>
+          </div>
+        </div>
+        <label>Conductor geometry (rectangular bar)</label>
+        <div class="row"><input id="width" type="number" step="0.001" min="0.001" value="1.00"><span id="uw" class="units">in</span></div>
+        <div class="row"><input id="thickness" type="number" step="0.001" min="0.001" value="0.25"><span id="ut" class="units">in</span></div>
+        <div class="row"><input id="length" type="number" step="0.01" min="0.01" value="8.0"><span id="ul" class="units">ft</span></div>
+
+        <div class="hr"></div>
+        <label>Electrical conditions</label>
+        <div class="row"><input id="current" type="number" step="0.1" min="0" value="500.0"><span class="units">A RMS</span></div>
+        <div class="row"><input id="freq" type="number" step="1" min="0" value="100000"><span class="units">Hz</span></div>
+        <div class="row"><input id="voltage" type="number" step="0.1" min="0" placeholder="(optional)"><span class="units">V (for % drop)</span></div>
+
+        <div class="hr"></div>
+        <label>Copper properties</label>
+        <div class="row"><input id="temp" type="number" step="0.1" value="20.0"><span class="units">°C</span></div>
+        <div class="hint">ρ<sub>20°C</sub> = 1.724×10⁻⁸ Ω·m, α = 0.00393/°C. μ ≈ μ₀.</div>
+      </div>
+
+      <div>
+        <div class="kpi">
+          <div class="item"><div class="label">Cross-sectional area (DC)</div><div class="value"><span id="areaDC">—</span> <span class="units">mm²</span></div></div>
+          <div class="item"><div class="label">Skin depth δ</div><div class="value"><span id="delta">—</span> <span class="units">mm</span></div></div>
+          <div class="item"><div class="label">R<sub>DC</sub></div><div class="value"><span id="rdc">—</span> <span class="units">mΩ</span></div></div>
+          <div class="item"><div class="label">R<sub>AC</sub> (approx)</div><div class="value"><span id="rac">—</span> <span class="units">mΩ</span></div></div>
+          <div class="item"><div class="label">Current density (AC eff.)</div><div class="value"><span id="j">—</span> <span class="units">A/mm²</span></div></div>
+          <div class="item"><div class="label">I²R loss (AC)</div><div class="value"><span id="loss">—</span> <span class="units">W</span></div></div>
+          <div class="item"><div class="label">Voltage drop (AC)</div><div class="value"><span id="vdrop">—</span> <span class="units">V</span></div></div>
+          <div class="item"><div class="label">R<sub>AC</sub>/R<sub>DC</sub></div><div class="value"><span id="kac">—</span></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="grid">
+      <div>
+        <div class="view3d" id="view3d">
+          <canvas id="gl"></canvas>
+          <div class="overlay">drag to rotate • scroll/pinch to zoom</div>
+        </div>
+        <div class="hint">Surfaces are textured with the live heatmap generated from the cross‑section (top/bottom dominate as δ shrinks). Proximity & edge singularities not modeled.</div>
+      </div>
+      <div>
+        <h3 style="margin:0 0 8px">Projected hotspots (cross‑section)</h3>
+        <canvas id="heat" width="540" height="300" aria-label="Hotspot heatmap"></canvas>
+        <div class="hint">Colors show relative RMS current density across the cross‑section; ∬J dA = I. For thick bars (t ≫ 2δ) the outer skins run hottest.</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// ---------- constants ----------
+const RHO20 = 1.724e-8, ALPHA = 0.00393, MU0 = 4e-7*Math.PI;
+let unit = 'in';
+
+function setUnits(u){
+  unit = u;
+  document.getElementById('u_in').classList.toggle('active', u==='in');
+  document.getElementById('u_mm').classList.toggle('active', u==='mm');
+  document.getElementById('uw').textContent = (u==='in')?'in':'mm';
+  document.getElementById('ut').textContent = (u==='in')?'in':'mm';
+  document.getElementById('ul').textContent = (u==='in')?'ft':'m';
+  recompute();
+}
+function toMeters(val, kind){
+  if(!(val>0)) return 0;
+  if(kind==='length'){
+    return (unit==='in') ? val*0.3048 : val;
+  }else{
+    return (unit==='in') ? val*0.0254 : val/1000;
+  }
+}
+function areaMM2(m2){ return m2*1e6; }
+function format(x,d=3){ if(!isFinite(x))return '—'; const a=Math.abs(x); if(a>=1000||a<0.01)return x.toExponential(d-1); return x.toFixed(d); }
+
+// ---------- heatmap (2D) ----------
+function colormap(a){
+  a = Math.min(1, Math.max(0, a));
+  if(a<0.33){const t=a/0.33; return [Math.round(26+t*(50-26)), Math.round(70+t*(216-70)), 255];}
+  else if(a<0.66){const t=(a-0.33)/0.33; return [Math.round(50+t*(255-50)), Math.round(216+t*(194-216)), Math.round(255+t*(45-255))];}
+  else{const t=(a-0.66)/0.34; return [255, Math.round(194+t*(45-194)), 45];}
+}
+function drawHeatmap(ctx, w, t, delta, I){
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  ctx.fillStyle = '#0a0b0e'; ctx.fillRect(0,0,W,H);
+
+  // pixel grid across physical cross‑section with padding & aspect
+  const pad = 10;
+  const availW = W-2*pad, availH = H-2*pad;
+  const ar = w/t;
+  let dW,dH;
+  if(availW/availH > ar){ dH=availH; dW=dH*ar; } else { dW=availW; dH=dW/ar; }
+  const x0=(W-dW)/2, y0=(H-dH)/2;
+
+  const Nx = Math.floor(dW), Ny = Math.floor(dH);
+  const dx = w/Nx, dy = t/Ny;
+  const invDelta = (delta>0)?1/delta:0;
+  const thinBlend = (t>0 && isFinite(invDelta)) ? Math.min(1, t/(2*delta)) : 0;
+  let maxJ=0, sumJ=0;
+
+  const img = ctx.createImageData(Nx,Ny);
+  const Jvals = new Float32Array(Nx*Ny);
+  for(let iy=0; iy<Ny; iy++){
+    const y=(iy+0.5)*dy;
+    const Jv = (thinBlend===0)?1:(Math.exp(-y*invDelta)+Math.exp(-(t-y)*invDelta));
+    for(let ix=0; ix<Nx; ix++){
+      let Jraw = (1-thinBlend)*1 + thinBlend*Jv;
+      Jvals[iy*Nx+ix]=Jraw;
+      if(Jraw>maxJ) maxJ=Jraw;
+      sumJ += Jraw;
+    }
+  }
+  // Normalize: ∬J dA = I
+  const area = w*t;
+  const scale = (sumJ*dx*dy>0)? I/(sumJ*dx*dy) : 0;
+  // second pass to draw
+  for(let iy=0; iy<Ny; iy++){
+    for(let ix=0; ix<Nx; ix++){
+      const j = Jvals[iy*Nx+ix]*scale;
+      const a = (maxJ>0)? (Jvals[iy*Nx+ix]/maxJ) : 0;
+      const [r,g,b]=colormap(a);
+      const p = ((Ny-1-iy)*Nx + ix)*4;
+      img.data[p]=r; img.data[p+1]=g; img.data[p+2]=b; img.data[p+3]=255;
+    }
+  }
+  const tmp=document.createElement('canvas'); tmp.width=Nx; tmp.height=Ny;
+  tmp.getContext('2d').putImageData(img,0,0);
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(tmp, x0, y0, dW, dH);
+  ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.lineWidth=2; ctx.strokeRect(x0,y0,dW,dH);
+  return tmp; // return the heat texture canvas
+}
+
+// ---------- WebGL minimal renderer ----------
+let gl, prog, buffers={}, u={};
+let rot = mat4Identity(), distance=2.8; // camera distance
+let lastX=0,lastY=0,drag=false;
+
+function initGL(){
+  const cvs = document.getElementById('gl');
+  // Fit canvas to container
+  function resize(){
+    const rect = cvs.parentElement.getBoundingClientRect();
+    cvs.width = Math.max(640, Math.floor(rect.width));
+    cvs.height = Math.max(360, Math.floor(rect.height));
+    if(gl) gl.viewport(0,0,cvs.width,cvs.height);
+    requestAnimationFrame(drawGL);
+  }
+  new ResizeObserver(resize).observe(cvs.parentElement);
+  gl = cvs.getContext('webgl', {antialias:true, alpha:false});
+  if(!gl){ alert('WebGL not supported'); return; }
+  const vs = `
+  attribute vec3 aPos;
+  attribute vec3 aNormal;
+  attribute vec2 aUV;
+  uniform mat4 uMVP;
+  uniform mat4 uModel;
+  varying vec3 vN;
+  varying vec2 vUV;
+  varying vec3 vPos;
+  void main(){
+    vN = mat3(uModel) * aNormal;
+    vUV = aUV;
+    vPos = (uModel * vec4(aPos,1.0)).xyz;
+    gl_Position = uMVP * vec4(aPos,1.0);
+  }`;
+  const fs = `
+  precision mediump float;
+  varying vec3 vN;
+  varying vec2 vUV;
+  uniform sampler2D uTex;
+  uniform vec3 uLightDir;
+  uniform vec3 uTint;
+  void main(){
+    vec3 N = normalize(vN);
+    float ndl = max(dot(N, normalize(uLightDir)), 0.0);
+    vec3 tex = texture2D(uTex, vUV).rgb;
+    // simple shading: texture * (0.35 + 0.65*ndl)
+    float shade = 0.35 + 0.65*ndl;
+    gl_FragColor = vec4(tex * shade, 1.0);
+  }`;
+  prog = link(gl, vs, fs);
+  gl.useProgram(prog);
+  u.mvp = gl.getUniformLocation(prog,'uMVP');
+  u.model = gl.getUniformLocation(prog,'uModel');
+  u.tex = gl.getUniformLocation(prog,'uTex');
+  u.light = gl.getUniformLocation(prog,'uLightDir');
+  u.tint = gl.getUniformLocation(prog,'uTint');
+
+  // events
+  const view = document.getElementById('view3d');
+  view.addEventListener('mousedown', e=>{drag=true; lastX=e.clientX; lastY=e.clientY;});
+  window.addEventListener('mouseup', ()=>drag=false);
+  window.addEventListener('mousemove', e=>{
+    if(!drag) return;
+    const dx=(e.clientX-lastX)/200, dy=(e.clientY-lastY)/200;
+    lastX=e.clientX; lastY=e.clientY;
+    rot = mat4Mul(rot, mat4RotateY(dx));
+    rot = mat4Mul(rot, mat4RotateX(dy));
+    requestAnimationFrame(drawGL);
+  });
+  view.addEventListener('wheel', e=>{
+    e.preventDefault();
+    distance *= (1 + Math.sign(e.deltaY)*0.08);
+    distance = Math.max(0.8, Math.min(8.0, distance));
+    requestAnimationFrame(drawGL);
+  }, {passive:false});
+}
+
+function buildBox(wL, wW, wT){
+  // Build a box centered at origin with size L (x), W (z), T (y)
+  const L=wL, W=wW, T=wT;
+  const hx=L/2, hy=T/2, hz=W/2;
+  // positions, normals, uvs per face (24 verts)
+  // Map heat texture (from cross-section) onto top/bottom faces using x->width, y->thickness (v axis)
+  // For sides, reuse same texture stretched.
+  const P=[
+    // +Y top
+    -hx, hy,-hz,   0,1,0,   0,0,
+     hx, hy,-hz,   0,1,0,   1,0,
+     hx, hy, hz,   0,1,0,   1,1,
+    -hx, hy, hz,   0,1,0,   0,1,
+    // -Y bottom
+    -hx,-hy, hz,   0,-1,0,  0,0,
+     hx,-hy, hz,   0,-1,0,  1,0,
+     hx,-hy,-hz,   0,-1,0,  1,1,
+    -hx,-hy,-hz,   0,-1,0,  0,1,
+    // +X
+     hx,-hy,-hz,   1,0,0,   0,0,
+     hx, hy,-hz,   1,0,0,   1,0,
+     hx, hy, hz,   1,0,0,   1,1,
+     hx,-hy, hz,   1,0,0,   0,1,
+    // -X
+    -hx,-hy, hz,  -1,0,0,   0,0,
+    -hx, hy, hz,  -1,0,0,   1,0,
+    -hx, hy,-hz,  -1,0,0,   1,1,
+    -hx,-hy,-hz,  -1,0,0,   0,1,
+    // +Z
+    -hx,-hy, hz,   0,0,1,   0,0,
+     hx,-hy, hz,   0,0,1,   1,0,
+     hx, hy, hz,   0,0,1,   1,1,
+    -hx, hy, hz,   0,0,1,   0,1,
+    // -Z
+     hx,-hy,-hz,   0,0,-1,  0,0,
+    -hx,-hy,-hz,   0,0,-1,  1,0,
+    -hx, hy,-hz,   0,0,-1,  1,1,
+     hx, hy,-hz,   0,0,-1,  0,1,
+  ];
+  const idx=[0,1,2, 0,2,3, 4,5,6, 4,6,7, 8,9,10, 8,10,11, 12,13,14, 12,14,15, 16,17,18, 16,18,19, 20,21,22, 20,22,23];
+  if(buffers.vao){ // delete old
+    gl.deleteBuffer(buffers.vbo); gl.deleteBuffer(buffers.ibo);
+  }
+  buffers.vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffers.vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(P), gl.STATIC_DRAW);
+  buffers.ibo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.ibo);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
+
+  const stride = (3+3+2)*4;
+  const aPos = gl.getAttribLocation(prog,'aPos');
+  const aNormal = gl.getAttribLocation(prog,'aNormal');
+  const aUV = gl.getAttribLocation(prog,'aUV');
+  gl.vertexAttribPointer(aPos,3,gl.FLOAT,false,stride,0); gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aNormal,3,gl.FLOAT,false,stride,3*4); gl.enableVertexAttribArray(aNormal);
+  gl.vertexAttribPointer(aUV,2,gl.FLOAT,false,stride,6*4); gl.enableVertexAttribArray(aUV);
+  buffers.count = idx.length;
+}
+
+let tex;
+function updateTextureFromCanvas(canvas){
+  if(!tex){ tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); }
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+}
+
+function drawGL(){
+  if(!gl) return;
+  gl.enable(gl.DEPTH_TEST);
+  gl.clearColor(0.04,0.05,0.07,1);
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+  const cvs = document.getElementById('gl');
+  const aspect = cvs.width/cvs.height;
+  const P = mat4Perspective(45*Math.PI/180, aspect, 0.05, 50);
+  const eye=[0,0,distance], center=[0,0,0], up=[0,1,0];
+  const V = mat4LookAt(eye,center,up);
+  const M = rot;
+  const MVP = mat4Mul(mat4Mul(P,V),M);
+  gl.useProgram(prog);
+  gl.uniformMatrix4fv(u.mvp,false,MVP);
+  gl.uniformMatrix4fv(u.model,false,M);
+  gl.uniform3f(u.light, 0.7,0.9,0.3);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.uniform1i(u.tex,0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffers.vbo);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.ibo);
+  gl.drawElements(gl.TRIANGLES, buffers.count, gl.UNSIGNED_SHORT, 0);
+}
+
+// ---------- tiny mat4 helpers ----------
+function mat4Identity(){ return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]; }
+function mat4Mul(a,b){
+  const r=new Array(16);
+  for(let i=0;i<4;i++)for(let j=0;j<4;j++){ r[i*4+j]=0; for(let k=0;k<4;k++) r[i*4+j]+=a[i*4+k]*b[k*4+j]; }
+  return r;
+}
+function mat4RotateX(a){
+  const c=Math.cos(a), s=Math.sin(a);
+  return [1,0,0,0, 0,c,-s,0, 0,s,c,0, 0,0,0,1];
+}
+function mat4RotateY(a){
+  const c=Math.cos(a), s=Math.sin(a);
+  return [c,0,s,0, 0,1,0,0, -s,0,c,0, 0,0,0,1];
+}
+function mat4Perspective(fovy,aspect,near,far){
+  const f=1/Math.tan(fovy/2), nf=1/(near-far);
+  return [f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,(2*far*near)*nf,0];
+}
+function mat4LookAt(eye,center,up){
+  const zx=eye[0]-center[0], zy=eye[1]-center[1], zz=eye[2]-center[2];
+  const zl=1/Math.hypot(zx,zy,zz); const z=[zx*zl, zy*zl, zz*zl];
+  const xx=up[1]*z[2]-up[2]*z[1], xy=up[2]*z[0]-up[0]*z[2], xz=up[0]*z[1]-up[1]*z[0];
+  const xl=1/Math.hypot(xx,xy,xz); const x=[xx*xl, xy*xl, xz*xl];
+  const y=[z[1]*x[2]-z[2]*x[1], z[2]*x[0]-z[0]*x[2], z[0]*x[1]-z[1]*x[0]];
+  return [x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0, -(x[0]*eye[0]+x[1]*eye[1]+x[2]*eye[2]), -(y[0]*eye[0]+y[1]*eye[1]+y[2]*eye[2]), -(z[0]*eye[0]+z[1]*eye[1]+z[2]*eye[2]),1];
+}
+
+// ---------- compute + wire-up ----------
+function recompute(){
+  // inputs
+  const w_in = parseFloat(document.getElementById('width').value);
+  const t_in = parseFloat(document.getElementById('thickness').value);
+  const L_in = parseFloat(document.getElementById('length').value);
+  const I = parseFloat(document.getElementById('current').value);
+  const f = parseFloat(document.getElementById('freq').value);
+  const Vsup = parseFloat(document.getElementById('voltage').value);
+  const T = parseFloat(document.getElementById('temp').value);
+
+  if(!(w_in>0 && t_in>0 && L_in>0 && f>=0 && I>=0)) return;
+
+  // SI
+  const w = toMeters(w_in,'geom');
+  const t = toMeters(t_in,'geom');
+  const L = toMeters(L_in,'length');
+
+  // resistivity @T
+  const rho = RHO20 * (1 + ALPHA*(T-20));
+  // areas
+  const A_dc = w*t;
+  const area_dc_mm2 = areaMM2(A_dc);
+  // skin depth
+  const omega = 2*Math.PI*f;
+  const delta = (f>0)? Math.sqrt(2*rho/(MU0*omega)) : 1e9;
+  // AC area approx
+  const A_eff = (f<=0 || t<=2*delta) ? A_dc : 2*w*delta;
+  const R_dc = rho*L/A_dc;
+  const R_ac = rho*L/A_eff;
+  const J_eff = (A_eff>0)? I/A_eff : 0; // A/m^2
+  const P = I*I*R_ac, Vdrop = I*R_ac, kac = R_ac/R_dc;
+
+  // KPIs
+  document.getElementById('areaDC').textContent = format(area_dc_mm2,3);
+  document.getElementById('delta').textContent = format(delta*1000,3);
+  document.getElementById('rdc').textContent = format(R_dc*1000,3);
+  document.getElementById('rac').textContent = format(R_ac*1000,3);
+  document.getElementById('j').textContent = format(J_eff/1e6,3);
+  document.getElementById('loss').textContent = format(P,3);
+  document.getElementById('vdrop').textContent = format(Vdrop,3);
+  document.getElementById('kac').textContent = format(kac,3);
+
+  // 2D heat texture
+  const heatCtx = document.getElementById('heat').getContext('2d');
+  const heatTexCanvas = drawHeatmap(heatCtx, w, t, delta, I);
+
+  // 3D: build box and update texture
+  const Lscale = L, Wscale = w, Tscale = t;
+  // Normalize sizes so they fit view (scale to ~1.8 units max dimension)
+  const maxDim = Math.max(Lscale, Wscale, Tscale);
+  const s = 1.8 / maxDim;
+  buildBox(Lscale*s, Wscale*s, Tscale*s);
+  updateTextureFromCanvas(heatTexCanvas);
+  requestAnimationFrame(drawGL);
+}
+
+function link(gl, vsSrc, fsSrc){
+  function compile(type, src){
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){ console.error(gl.getShaderInfoLog(s)); }
+    return s;
+  }
+  const vs=compile(gl.VERTEX_SHADER,vsSrc), fs=compile(gl.FRAGMENT_SHADER,fsSrc);
+  const p = gl.createProgram(); gl.attachShader(p,vs); gl.attachShader(p,fs); gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)){ console.error(gl.getProgramInfoLog(p)); }
+  return p;
+}
+
+function init(){
+  // input bindings
+  ['width','thickness','length','current','freq','voltage','temp'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.addEventListener('input', recompute);
+    el.addEventListener('change', recompute);
+  });
+  initGL();
+  recompute();
+}
+window.addEventListener('DOMContentLoaded', init, {passive:true});
+</script>
+</body>
+</html>
