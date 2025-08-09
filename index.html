@@ -1,97 +1,448 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Copper Bus Simulator — 3D + Heatmap</title>
 <style>
-  body {
-    margin: 0;
-    padding: 0;
-    font-family: sans-serif;
-    background: #1e1e1e;
-    color: white;
-    overflow-x: hidden;
+  :root{
+    --bg:#0e0f12; --card:#171a20; --ink:#e6e7ea; --muted:#9aa0a6; --accent:#4da3ff;
   }
-  main {
-    max-width: 900px;
-    margin: auto;
-    padding: 20px;
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;
+    overflow-x:hidden;
   }
-  canvas {
-    display: block;
-    margin: 20px auto;
-    max-width: 100%;
-    height: auto !important;
+  header{
+    padding:16px 20px; position:sticky; top:0; z-index:5;
+    backdrop-filter:saturate(1.2) blur(8px);
+    background:linear-gradient(180deg, rgba(23,26,32,.9), rgba(23,26,32,.6) 60%, rgba(23,26,32,0));
+    border-bottom:1px solid rgba(255,255,255,.06);
   }
-  .section {
-    margin-bottom: 1.5rem;
+  h1{font-size:20px; margin:0 0 2px}
+  .sub{color:var(--muted); font-size:13px}
+  main{padding:20px; max-width:1250px; margin:auto; display:grid; gap:18px; grid-template-columns:1.05fr .95fr}
+  @media (max-width:1100px){ main{grid-template-columns:1fr} }
+  .card{
+    background:var(--card); border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:16px;
+    box-shadow:0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03)
   }
-  input, button, select {
-    padding: 5px;
-    margin: 3px 0;
-    border-radius: 4px;
-    border: none;
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  @media (max-width:680px){ .grid{grid-template-columns:1fr} }
+  label{display:block; font-size:13px; color:var(--muted); margin:10px 0 6px}
+  .row{display:flex; gap:10px; align-items:center}
+  .row input[type="number"]{
+    width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.1);
+    background:#0c0d10; color:var(--ink); font-size:14px; outline:none
   }
+  .units{white-space:nowrap; color:var(--muted); font-size:12px}
+  .switch{display:inline-flex; gap:8px; align-items:center; background:#0c0d10; border:1px solid rgba(255,255,255,.06); padding:4px; border-radius:999px}
+  .switch button{border:0; background:transparent; color:var(--muted); padding:6px 10px; border-radius:999px; cursor:pointer; font-size:12px}
+  .switch button.active{background:var(--accent); color:#05152a}
+  .kpi{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px}
+  .kpi .item{background:#0c0d10; border-radius:12px; border:1px solid rgba(255,255,255,.06); padding:12px}
+  .kpi .label{color:var(--muted); font-size:12px}
+  .kpi .value{font-size:20px; font-weight:650; margin-top:2px}
+  .hr{height:1px; background:rgba(255,255,255,.08); margin:12px 0}
+  .view3d{height:420px; border-radius:12px; border:1px solid rgba(255,255,255,.06); background:#0a0b0e; position:relative}
+  .overlay{position:absolute; right:10px; top:10px; background:rgba(0,0,0,.35); padding:6px 10px; border-radius:10px; font-size:12px; color:var(--muted); backdrop-filter:blur(6px)}
+  canvas{display:block; width:100%; height:100%}
+  a{color:var(--accent); text-decoration:none}
+  .hint{font-size:12px; color:var(--muted); margin-top:6px}
 </style>
 </head>
 <body>
-<main>
+<header>
   <h1>Copper Bus Simulator — 3D + Heatmap</h1>
-  <p>Rotate the 3D bus and tune geometry, current, and frequency. Surfaces are textured with the live current-density heatmap (skin-effect only; no proximity).</p>
+  <div class="sub">Rotate the 3D bus and tune geometry, current, and frequency. Surfaces are textured with the live current-density heatmap (skin-effect only; no proximity).</div>
+</header>
 
-  <div class="section">
-    <label>Geometry units: </label>
-    <select id="units">
-      <option value="in">in</option>
-      <option value="mm">mm</option>
-    </select>
-  </div>
+<main>
+  <section class="card">
+    <div class="grid">
+      <div>
+        <div class="row">
+          <label>Geometry units</label>
+          <div class="switch">
+            <button id="u_in" class="active" onclick="setUnits('in')">in</button>
+            <button id="u_mm" onclick="setUnits('mm')">mm</button>
+          </div>
+        </div>
+        <label>Conductor geometry (rectangular bar)</label>
+        <div class="row"><input id="width" type="number" step="0.001" min="0.001" value="1.00"><span id="uw" class="units">in</span></div>
+        <div class="row"><input id="thickness" type="number" step="0.001" min="0.001" value="0.25"><span id="ut" class="units">in</span></div>
+        <div class="row"><input id="length" type="number" step="0.01" min="0.01" value="8.0"><span id="ul" class="units">ft</span></div>
 
-  <div class="section">
-    <label>Conductor geometry (rectangular bar)</label><br>
-    <input type="number" step="0.01" id="width" placeholder="Width">
-    <input type="number" step="0.01" id="thickness" placeholder="Thickness">
-    <input type="number" step="0.01" id="length" placeholder="Length">
-  </div>
+        <div class="hr"></div>
+        <label>Electrical conditions</label>
+        <div class="row"><input id="current" type="number" step="0.1" min="0" value="500.0"><span class="units">A RMS</span></div>
+        <div class="row"><input id="freq" type="number" step="1" min="0" value="100000"><span class="units">Hz</span></div>
+        <div class="row"><input id="voltage" type="number" step="0.1" min="0" placeholder="(optional)"><span class="units">V (for % drop)</span></div>
 
-  <div class="section">
-    <label>Electrical conditions</label><br>
-    <input type="number" step="0.01" id="current" placeholder="Current (A)">
-    <input type="number" step="0.01" id="frequency" placeholder="Frequency (Hz)">
-    <input type="number" step="0.01" id="temp" placeholder="Temperature (°C)">
-  </div>
+        <div class="hr"></div>
+        <label>Copper properties</label>
+        <div class="row"><input id="temp" type="number" step="0.1" value="20.0"><span class="units">°C</span></div>
+        <div class="hint">ρ<sub>20°C</sub> = 1.724×10⁻⁸ Ω·m, α = 0.00393/°C. μ ≈ μ₀.</div>
+      </div>
 
-  <div class="section">
-    <label>Copper properties</label><br>
-    <input type="number" step="0.01" id="rho" placeholder="Resistivity (Ω·m)">
-    <p>ρ20°C = 1.724×10⁻⁸ Ω·m, α = 0.00393/°C. μ ≈ μ₀.</p>
-  </div>
+      <div>
+        <div class="kpi">
+          <div class="item"><div class="label">Cross-sectional area (DC)</div><div class="value"><span id="areaDC">—</span> <span class="units">mm²</span></div></div>
+          <div class="item"><div class="label">Skin depth δ</div><div class="value"><span id="delta">—</span> <span class="units">mm</span></div></div>
+          <div class="item"><div class="label">R<sub>DC</sub></div><div class="value"><span id="rdc">—</span> <span class="units">mΩ</span></div></div>
+          <div class="item"><div class="label">R<sub>AC</sub> (approx)</div><div class="value"><span id="rac">—</span> <span class="units">mΩ</span></div></div>
+          <div class="item"><div class="label">Current density (AC eff.)</div><div class="value"><span id="j">—</span> <span class="units">A/mm²</span></div></div>
+          <div class="item"><div class="label">I²R loss (AC)</div><div class="value"><span id="loss">—</span> <span class="units">W</span></div></div>
+          <div class="item"><div class="label">Voltage drop (AC)</div><div class="value"><span id="vdrop">—</span> <span class="units">V</span></div></div>
+          <div class="item"><div class="label">R<sub>AC</sub>/R<sub>DC</sub></div><div class="value"><span id="kac">—</span></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-  <div id="results" class="section">
-    <p>Cross-sectional area (DC): <span id="area">—</span></p>
-    <p>R<sub>DC</sub>: <span id="rdc">—</span></p>
-    <p>Current density (AC eff.): <span id="j">—</span></p>
-    <p>Voltage drop (AC): <span id="vd">—</span></p>
-  </div>
-
-  <canvas id="heatmapCanvas" width="800" height="400"></canvas>
+  <section class="card">
+    <div class="grid">
+      <div>
+        <div class="view3d" id="view3d">
+          <canvas id="gl"></canvas>
+          <div class="overlay">drag to rotate • scroll/pinch to zoom</div>
+        </div>
+        <div class="hint">Surfaces are textured with the live heatmap generated from the cross-section (top/bottom dominate as δ shrinks). Proximity & edge singularities not modeled.</div>
+      </div>
+      <div>
+        <h3 style="margin:0 0 8px">Projected hotspots (cross-section)</h3>
+        <canvas id="heat" width="540" height="300" aria-label="Hotspot heatmap" style="width:100%;height:auto"></canvas>
+        <div class="hint">Colors show relative RMS current density across the cross-section; ∬J dA = I. For thick bars (t ≫ 2δ) the outer skins run hottest.</div>
+      </div>
+    </div>
+  </section>
 </main>
 
 <script>
-  const canvas = document.getElementById('heatmapCanvas');
-  const ctx = canvas.getContext('2d');
+/* ---------- constants ---------- */
+const RHO20 = 1.724e-8, ALPHA = 0.00393, MU0 = 4e-7*Math.PI;
+let unit = 'in';
 
-  // Example: Fill with a placeholder gradient until 3D logic is added
-  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, 'red');
-  gradient.addColorStop(1, 'blue');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+/* ---------- UI helpers ---------- */
+function setUnits(u){
+  unit = u;
+  document.getElementById('u_in').classList.toggle('active', u==='in');
+  document.getElementById('u_mm').classList.toggle('active', u==='mm');
+  document.getElementById('uw').textContent = (u==='in')?'in':'mm';
+  document.getElementById('ut').textContent = (u==='in')?'in':'mm';
+  document.getElementById('ul').textContent = (u==='in')?'ft':'m';
+  recompute();
+}
+function toMeters(val, kind){
+  if(!(val>0)) return 0;
+  if(kind==='length') return (unit==='in') ? val*0.3048 : val;  // ft -> m or already m
+  return (unit==='in') ? val*0.0254 : val/1000;                  // in -> m or mm -> m
+}
+function areaMM2(m2){ return m2*1e6; }
+function format(x,d=3){ if(!isFinite(x))return '—'; const a=Math.abs(x); if(a>=1000||a<0.01)return x.toExponential(d-1); return x.toFixed(d); }
 
-  // Prevent infinite scrolling bug by fitting to viewport
-  document.body.style.height = "auto";
-  document.documentElement.style.height = "auto";
+/* ---------- heatmap (2D) ---------- */
+function colormap(a){
+  a = Math.min(1, Math.max(0, a));
+  if(a<0.33){const t=a/0.33; return [Math.round(26+t*(50-26)), Math.round(70+t*(216-70)), 255];}
+  else if(a<0.66){const t=(a-0.33)/0.33; return [Math.round(50+t*(255-50)), Math.round(216+t*(194-216)), Math.round(255+t*(45-255))];}
+  else{const t=(a-0.66)/0.34; return [255, Math.round(194+t*(45-194)), 45];}
+}
+function drawHeatmap(ctx, w, t, delta, I){
+  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio||1));
+  // scale backing store for crispness
+  const cssW = ctx.canvas.clientWidth, cssH = ctx.canvas.clientHeight;
+  if(cssW>0 && cssH>0){
+    ctx.canvas.width = Math.floor(cssW*dpr);
+    ctx.canvas.height = Math.floor(cssH*dpr);
+  }
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  ctx.fillStyle = '#0a0b0e'; ctx.fillRect(0,0,W,H);
+
+  const pad = 10;
+  const availW = W-2*pad, availH = H-2*pad;
+  const ar = w/t;
+  let dW,dH;
+  if(availW/availH > ar){ dH=availH; dW=dH*ar; } else { dW=availW; dH=dW/ar; }
+  const x0=(W-dW)/2, y0=(H-dH)/2;
+
+  const Nx = Math.max(40, Math.floor(dW));
+  const Ny = Math.max(40, Math.floor(dH));
+  const dx = w/Nx, dy = t/Ny;
+  const invDelta = (delta>0)?1/delta:0;
+  const thinBlend = (t>0 && isFinite(invDelta)) ? Math.min(1, t/(2*delta)) : 0;
+
+  let maxJ=0, sumJ=0;
+  const img = ctx.createImageData(Nx,Ny);
+  const Jvals = new Float32Array(Nx*Ny);
+  for(let iy=0; iy<Ny; iy++){
+    const y=(iy+0.5)*dy;
+    const Jv = (thinBlend===0)?1:(Math.exp(-y*invDelta)+Math.exp(-(t-y)*invDelta));
+    for(let ix=0; ix<Nx; ix++){
+      const Jraw = (1-thinBlend)*1 + thinBlend*Jv;
+      Jvals[iy*Nx+ix]=Jraw; if(Jraw>maxJ) maxJ=Jraw; sumJ += Jraw;
+    }
+  }
+  // normalize so ∬J dA = I
+  const scale = (sumJ*dx*dy>0)? I/(sumJ*dx*dy) : 0;
+
+  for(let iy=0; iy<Ny; iy++){
+    for(let ix=0; ix<Nx; ix++){
+      const a = (maxJ>0)? (Jvals[iy*Nx+ix]/maxJ) : 0;
+      const [r,g,b]=colormap(a);
+      const p = ((Ny-1-iy)*Nx + ix)*4;
+      img.data[p]=r; img.data[p+1]=g; img.data[p+2]=b; img.data[p+3]=255;
+    }
+  }
+  const tmp=document.createElement('canvas'); tmp.width=Nx; tmp.height=Ny;
+  tmp.getContext('2d').putImageData(img,0,0);
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(tmp, x0, y0, dW, dH);
+  ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.lineWidth=2; ctx.strokeRect(x0,y0,dW,dH);
+  return tmp; // texture source
+}
+
+/* ---------- WebGL minimal renderer ---------- */
+let gl, prog, buffers={}, u={}, tex, rot = mat4Identity(), distance=2.8;
+let lastX=0,lastY=0,drag=false;
+
+function initGL(){
+  const cvs = document.getElementById('gl');
+  function resize(){
+    const rect = cvs.parentElement.getBoundingClientRect();
+    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    // CSS size = container; backing store = CSS*dpr
+    cvs.style.width = Math.floor(rect.width) + 'px';
+    cvs.style.height = Math.floor(rect.height) + 'px';
+    cvs.width = Math.max(1, Math.floor(rect.width * dpr));
+    cvs.height = Math.max(1, Math.floor(rect.height * dpr));
+    if(gl) gl.viewport(0,0,cvs.width,cvs.height);
+    requestAnimationFrame(drawGL);
+  }
+  new ResizeObserver(resize).observe(cvs.parentElement);
+
+  gl = cvs.getContext('webgl', {antialias:true, alpha:false}) || cvs.getContext('experimental-webgl');
+  if(!gl){ console.warn('WebGL not available'); return; }
+  const vs = `
+  attribute vec3 aPos; attribute vec3 aNormal; attribute vec2 aUV;
+  uniform mat4 uMVP; uniform mat4 uModel;
+  varying vec3 vN; varying vec2 vUV;
+  void main(){ vN = mat3(uModel)*aNormal; vUV=aUV; gl_Position = uMVP*vec4(aPos,1.0); }`;
+  const fs = `
+  precision mediump float;
+  varying vec3 vN; varying vec2 vUV;
+  uniform sampler2D uTex; uniform vec3 uLightDir;
+  void main(){
+    vec3 N=normalize(vN);
+    float ndl=max(dot(N, normalize(uLightDir)),0.0);
+    vec3 tex=texture2D(uTex, vUV).rgb;
+    float shade=0.35+0.65*ndl;
+    gl_FragColor=vec4(tex*shade,1.0);
+  }`;
+  prog = link(gl, vs, fs);
+  gl.useProgram(prog);
+  u.mvp = gl.getUniformLocation(prog,'uMVP');
+  u.model = gl.getUniformLocation(prog,'uModel');
+  u.tex = gl.getUniformLocation(prog,'uTex');
+  u.light = gl.getUniformLocation(prog,'uLightDir');
+
+  const view = document.getElementById('view3d');
+  view.addEventListener('mousedown', e=>{drag=true; lastX=e.clientX; lastY=e.clientY;});
+  window.addEventListener('mouseup', ()=>drag=false);
+  window.addEventListener('mousemove', e=>{
+    if(!drag) return;
+    const dx=(e.clientX-lastX)/200, dy=(e.clientY-lastY)/200;
+    lastX=e.clientX; lastY=e.clientY;
+    rot = mat4Mul(rot, mat4RotateY(dx));
+    rot = mat4Mul(rot, mat4RotateX(dy));
+    requestAnimationFrame(drawGL);
+  });
+  view.addEventListener('wheel', e=>{
+    e.preventDefault();
+    distance *= (1 + Math.sign(e.deltaY)*0.08);
+    distance = Math.max(0.8, Math.min(8.0, distance));
+    requestAnimationFrame(drawGL);
+  }, {passive:false});
+  resize();
+}
+
+function buildBox(L,W,T){
+  const hx=L/2, hy=T/2, hz=W/2;
+  const P=[
+    // +Y top
+    -hx, hy,-hz,   0,1,0,   0,0,
+     hx, hy,-hz,   0,1,0,   1,0,
+     hx, hy, hz,   0,1,0,   1,1,
+    -hx, hy, hz,   0,1,0,   0,1,
+    // -Y bottom
+    -hx,-hy, hz,   0,-1,0,  0,0,
+     hx,-hy, hz,   0,-1,0,  1,0,
+     hx,-hy,-hz,   0,-1,0,  1,1,
+    -hx,-hy,-hz,   0,-1,0,  0,1,
+    // +X
+     hx,-hy,-hz,   1,0,0,   0,0,
+     hx, hy,-hz,   1,0,0,   1,0,
+     hx, hy, hz,   1,0,0,   1,1,
+     hx,-hy, hz,   1,0,0,   0,1,
+    // -X
+    -hx,-hy, hz,  -1,0,0,   0,0,
+    -hx, hy, hz,  -1,0,0,   1,0,
+    -hx, hy,-hz,  -1,0,0,   1,1,
+    -hx,-hy,-hz,  -1,0,0,   0,1,
+    // +Z
+    -hx,-hy, hz,   0,0,1,   0,0,
+     hx,-hy, hz,   0,0,1,   1,0,
+     hx, hy, hz,   0,0,1,   1,1,
+    -hx, hy, hz,   0,0,1,   0,1,
+    // -Z
+     hx,-hy,-hz,   0,0,-1,  0,0,
+    -hx,-hy,-hz,   0,0,-1,  1,0,
+    -hx, hy,-hz,   0,0,-1,  1,1,
+     hx, hy,-hz,   0,0,-1,  0,1,
+  ];
+  const idx=[0,1,2,0,2,3, 4,5,6,4,6,7, 8,9,10,8,10,11, 12,13,14,12,14,15, 16,17,18,16,18,19, 20,21,22,20,22,23];
+
+  if(buffers.vbo){ gl.deleteBuffer(buffers.vbo); gl.deleteBuffer(buffers.ibo); }
+  buffers.vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffers.vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(P), gl.STATIC_DRAW);
+  buffers.ibo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.ibo);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
+
+  const stride=(3+3+2)*4;
+  const aPos=gl.getAttribLocation(prog,'aPos');
+  const aNormal=gl.getAttribLocation(prog,'aNormal');
+  const aUV=gl.getAttribLocation(prog,'aUV');
+  gl.vertexAttribPointer(aPos,3,gl.FLOAT,false,stride,0); gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aNormal,3,gl.FLOAT,false,stride,3*4); gl.enableVertexAttribArray(aNormal);
+  gl.vertexAttribPointer(aUV,2,gl.FLOAT,false,stride,6*4); gl.enableVertexAttribArray(aUV);
+  buffers.count=idx.length;
+}
+
+function updateTextureFromCanvas(canvas){
+  if(!tex){
+    tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,canvas);
+}
+
+function drawGL(){
+  if(!gl) return;
+  gl.enable(gl.DEPTH_TEST);
+  gl.clearColor(0.04,0.05,0.07,1);
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+  const cvs = document.getElementById('gl');
+  const aspect = cvs.width/cvs.height;
+  const P = mat4Perspective(45*Math.PI/180, aspect, 0.05, 50);
+  const eye=[0,0,distance], center=[0,0,0], up=[0,1,0];
+  const V = mat4LookAt(eye,center,up);
+  const M = rot;
+  const MVP = mat4Mul(mat4Mul(P,V),M);
+  gl.useProgram(prog);
+  gl.uniformMatrix4fv(u.mvp,false,MVP);
+  gl.uniformMatrix4fv(u.model,false,M);
+  gl.uniform3f(u.light, 0.7,0.9,0.3);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.uniform1i(u.tex,0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffers.vbo);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.ibo);
+  gl.drawElements(gl.TRIANGLES, buffers.count, gl.UNSIGNED_SHORT, 0);
+}
+
+/* ---------- tiny mat4 helpers ---------- */
+function mat4Identity(){ return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]; }
+function mat4Mul(a,b){ const r=new Array(16); for(let i=0;i<4;i++)for(let j=0;j<4;j++){ r[i*4+j]=0; for(let k=0;k<4;k++) r[i*4+j]+=a[i*4+k]*b[k*4+j]; } return r; }
+function mat4RotateX(a){ const c=Math.cos(a), s=Math.sin(a); return [1,0,0,0, 0,c,-s,0, 0,s,c,0, 0,0,0,1]; }
+function mat4RotateY(a){ const c=Math.cos(a), s=Math.sin(a); return [c,0,s,0, 0,1,0,0, -s,0,c,0, 0,0,0,1]; }
+function mat4Perspective(fovy,aspect,near,far){ const f=1/Math.tan(fovy/2), nf=1/(near-far);
+  return [f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,(2*far*near)*nf,0]; }
+function mat4LookAt(eye,center,up){
+  const zx=eye[0]-center[0], zy=eye[1]-center[1], zz=eye[2]-center[2];
+  const zl=1/Math.hypot(zx,zy,zz); const z=[zx*zl, zy*zl, zz*zl];
+  const xx=up[1]*z[2]-up[2]*z[1], xy=up[2]*z[0]-up[0]*z[2], xz=up[0]*z[1]-up[1]*z[0];
+  const xl=1/Math.hypot(xx,xy,xz); const x=[xx*xl, xy*xl, xz*xl];
+  const y=[z[1]*x[2]-z[2]*x[1], z[2]*x[0]-z[0]*x[2], z[0]*x[1]-z[1]*x[0]];
+  return [x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0, -(x[0]*eye[0]+x[1]*eye[1]+x[2]*eye[2]), -(y[0]*eye[0]+y[1]*eye[1]+y[2]*eye[2]), -(z[0]*eye[0]+z[1]*eye[1]+z[2]*eye[2]),1];
+}
+
+/* ---------- compute + wire-up ---------- */
+function recompute(){
+  const w_in = parseFloat(document.getElementById('width').value);
+  const t_in = parseFloat(document.getElementById('thickness').value);
+  const L_in = parseFloat(document.getElementById('length').value);
+  const I = parseFloat(document.getElementById('current').value);
+  const f = parseFloat(document.getElementById('freq').value);
+  const Vsup = parseFloat(document.getElementById('voltage').value);
+  const T = parseFloat(document.getElementById('temp').value);
+
+  if(!(w_in>0 && t_in>0 && L_in>0 && f>=0 && I>=0)) return;
+
+  const w = toMeters(w_in,'geom');
+  const t = toMeters(t_in,'geom');
+  const L = toMeters(L_in,'length');
+
+  const rho = RHO20 * (1 + ALPHA*(T-20));
+  const A_dc = w*t;
+  const area_dc_mm2 = areaMM2(A_dc);
+  const omega = 2*Math.PI*f;
+  const delta = (f>0)? Math.sqrt(2*rho/(MU0*omega)) : 1e9;
+  const A_eff = (f<=0 || t<=2*delta) ? A_dc : 2*w*delta;
+  const R_dc = rho*L/A_dc;
+  const R_ac = rho*L/A_eff;
+  const J_eff = (A_eff>0)? I/A_eff : 0; // A/m^2
+  const P = I*I*R_ac, Vdrop = I*R_ac, kac = R_ac/R_dc;
+
+  document.getElementById('areaDC').textContent = format(area_dc_mm2,3);
+  document.getElementById('delta').textContent = format(delta*1000,3);
+  document.getElementById('rdc').textContent = format(R_dc*1000,3);
+  document.getElementById('rac').textContent = format(R_ac*1000,3);
+  document.getElementById('j').textContent = format(J_eff/1e6,3);
+  document.getElementById('loss').textContent = format(P,3);
+  document.getElementById('vdrop').textContent = format(Vdrop,3);
+  document.getElementById('kac').textContent = format(kac,3);
+
+  // 2D heat texture
+  const heatCtx = document.getElementById('heat').getContext('2d');
+  const heatTexCanvas = drawHeatmap(heatCtx, w, t, delta, I);
+
+  // 3D: build box and update texture
+  if(gl){
+    const maxDim = Math.max(L, w, t);
+    const s = 1.8 / maxDim;
+    buildBox(L*s, w*s, t*s);
+    updateTextureFromCanvas(heatTexCanvas);
+    requestAnimationFrame(drawGL);
+  }
+}
+
+function link(gl, vsSrc, fsSrc){
+  function comp(type, src){ const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s); if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){ console.error(gl.getShaderInfoLog(s)); } return s; }
+  const vs=comp(gl.VERTEX_SHADER,vsSrc), fs=comp(gl.FRAGMENT_SHADER,fsSrc);
+  const p = gl.createProgram(); gl.attachShader(p,vs); gl.attachShader(p,fs); gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)){ console.error(gl.getProgramInfoLog(p)); }
+  return p;
+}
+
+function init(){
+  ['width','thickness','length','current','freq','voltage','temp'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.addEventListener('input', recompute);
+    el.addEventListener('change', recompute);
+  });
+  initGL();
+  recompute();
+}
+window.addEventListener('DOMContentLoaded', init, {passive:true});
 </script>
 </body>
 </html>
